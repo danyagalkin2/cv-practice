@@ -35,7 +35,7 @@ python3 main.py ВХОДНОЙ_ФАЙЛ ВЫХОДНОЙ_ФАЙЛ --filter ИМ�
 | `film` | Имитация инфракрасной плёнки с зерном | `--grain-sigma` не меньше нуля, по умолчанию `10`; `--seed` |
 | `matte` | Белая овальная виньетка | `--radius` — нормализованный радиус белой рамки, по умолчанию `1.25`; `--feather` — ширина плавного перехода, по умолчанию `0.4` |
 | `scratches_texture` | Сепия, зерно и потёртости из текстуры | `--noise-sigma` (по умолчанию `15`); `--texture-alpha` от 0 до 1 (по умолчанию `0.65`); `--seed` |
-| `neon` | Контуры с голубым свечением | `--sob-threshold` не меньше нуля, по умолчанию `50` |
+| `neon` | Контуры с голубым свечением поверх фотографии | `--sob-threshold`, `--blur-size`, `--blur-iterations`, `--glow-strength`, `--neon-alpha` (описание ниже) |
 
 Для `film` и `scratches_texture` параметр `--seed` задаёт неотрицательное целое число.
 При одинаковых изображении, параметрах и `seed` результат повторяется.
@@ -52,7 +52,7 @@ python main.py images/mediabasket.jpg results/fade.png --filter fade --alpha 0.4
 python main.py images/bor_bridge_orig.jpg results/film.png --filter film --grain-sigma 10 --seed 10
 python main.py images/mediabasket.jpg results/matte.png --filter matte
 python main.py images/mediabasket.jpg results/scratches_texture.png --filter scratches_texture --noise-sigma 8 --texture-alpha 0.65 --seed 10
-python main.py images/mediabasket.jpg results/neon.png --filter neon --sob-threshold 50
+python main.py images/mediabasket.jpg results/neon.png --filter neon --sob-threshold 50 --blur-size 7 --blur-iterations 45 --glow-strength 1.2 --neon-alpha 0.5
 ```
 
 ## Описание алгоритмов
@@ -235,29 +235,44 @@ G = sqrt(Gx^2 + Gy^2)
 edges = 1, если G > sob_threshold, иначе 0
 ```
 
-Для свечения маска контуров усредняется ядром `ones(5, 5) / 25`:
+Из маски формируется мягкий ореол повторным усреднением:
 
 ```text
-glow = convolve(edges, ones(5, 5) / 25)
-strength = clip(edges + 2 * glow, 0, 1)
-result = strength * [0, 255, 255]
+kernel = ones(blur_size, blur_size) / blur_size²
+glow = edges
+glow = convolve(glow, kernel)  # повторить blur_iterations раз
+strength = maximum(edges, glow_strength * glow)
+neon = strength[..., None] * [0, 255, 255]
+result = clip(img + neon_alpha * neon, 0, 255)
 ```
 
-Затем создаётся широкий ореол. Копия `strength` усредняется 45 раз
-ядром `ones(7, 7) / 49`:
+`maximum` выбирает большее значение для каждого пикселя, сохраняя чёткие контуры.
+Результат переводится в `uint8`. Голубое свечение добавляется к исходной фотографии.
 
-```text
-halo = strength
-halo = convolve(halo, ones(7, 7) / 49)  # повторяется 45 раз
-strength = maximum(strength, 1.2 * halo)
-neon = strength * [0, 255, 255]
+| Аргумент | По умолчанию | Значение и ограничения |
+| --- | --- | --- |
+| `--sob-threshold` | `50` | Конечное число >= 0. Меньше порог — больше деталей считается контурами |
+| `--blur-size` | `7` | Положительное нечётное целое. Размер квадратного ядра усреднения; `1` не размывает маску |
+| `--blur-iterations` | `45` | Целое >= 0. Число проходов размытия; `0` оставляет маску без размытия |
+| `--glow-strength` | `1.2` | Конечное число >= 0. Усиление ореола; `0` оставляет только яркие контуры |
+| `--neon-alpha` | `0.5` | Число от 0 до 1. Сила всего эффекта; `0` возвращает исходное изображение |
+
+Увеличение `blur_size` или `blur_iterations` делает ореол шире и более рассеянным,
+при этом его пиковая яркость может уменьшаться. `glow_strength` регулирует яркость ореола.
+При отключённом размытии `glow_strength`
+может усиливать сам контур, поскольку `glow` совпадает с `edges`.
+Большие ядра и большое число проходов увеличивают время обработки.
+
+Запуск со стандартными настройками:
+
+```bash
+python main.py images/mediabasket.jpg results/neon.png --filter neon
 ```
 
-`maximum` выбирает большее значение для каждого пикселя.
-Результат — голубые контуры с мягким широким свечением на чёрном фоне.
+Пример с усиленным ореолом:
 
-В итоге применяем `neon` к исходному изображению с `neon_alpha = 0.5`
-```
-neon_aplha = 0.5
-result = base + neon_aplha * neon
+```bash
+python main.py images/mediabasket.jpg results/neon_glow.png --filter neon \
+  --sob-threshold 50 --blur-size 7 \
+  --blur-iterations 45 --glow-strength 2 --neon-alpha 0.6
 ```

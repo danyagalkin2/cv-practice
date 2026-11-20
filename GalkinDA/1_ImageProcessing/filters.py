@@ -46,7 +46,13 @@ class ImageFilter:
                 params.get('feather', 0.4)
             )
         if name == 'neon':
-            return Neon(params.get('sob_threshold', 50))
+            return Neon(
+                sob_threshold=params.get('sob_threshold', 50),
+                blur_size=params.get('blur_size', 7),
+                blur_iterations=params.get('blur_iterations', 45),
+                glow_strength=params.get('glow_strength', 1.2),
+                neon_alpha=params.get('neon_alpha', 0.5),
+            )
         if name == 'scratches_texture':
             return ScratchesTexture(params.get('noise_sigma', 15),
                                     params.get('texture_alpha', 0.65),
@@ -203,12 +209,27 @@ class ScratchesTexture(ImageFilter):
 
 
 class Neon(ImageFilter):
-    def __init__(self, sob_threshold=50):
-        if sob_threshold < 0:
-            raise ValueError('Порог Собеля не может быть отрицательным')
+    def __init__(self, sob_threshold=50, blur_size=7, blur_iterations=45,
+                 glow_strength=1.2, neon_alpha=0.5):
+        if not np.isfinite(sob_threshold) or sob_threshold < 0:
+            raise ValueError('Порог Собеля должен быть конечным числом не меньше нуля')
+        if not isinstance(blur_size, (int, np.integer)) or blur_size <= 0 or blur_size % 2 == 0:
+            raise ValueError('blur_size должен быть положительным нечётным целым числом')
+        if not isinstance(blur_iterations, (int, np.integer)) or blur_iterations < 0:
+            raise ValueError('blur_iterations должен быть целым числом не меньше нуля')
+        if not np.isfinite(glow_strength) or glow_strength < 0:
+            raise ValueError('glow_strength должен быть конечным числом не меньше нуля')
+        if not 0 <= neon_alpha <= 1:
+            raise ValueError('neon_alpha должен быть от 0 до 1')
         self.sob_threshold = sob_threshold
+        self.blur_size = blur_size
+        self.blur_iterations = blur_iterations
+        self.glow_strength = glow_strength
+        self.neon_alpha = neon_alpha
 
     def apply_filter(self, img):
+        if img.ndim != 3 or img.shape[2] != 3:
+            raise ValueError('Для неона нужно RGB-изображение')
         gray = get_gray(img)
         base = img.astype(np.float32)
         kernel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
@@ -219,15 +240,14 @@ class Neon(ImageFilter):
         gradient_y = convolve(gray, kernel_y)
         magnitude = np.sqrt(gradient_x ** 2 + gradient_y ** 2)
         edges = (magnitude > self.sob_threshold).astype(np.float32)
-        glow = convolve(edges, np.ones((5, 5), dtype=np.float32) / 25)
-        strength = np.clip(edges + 2 * glow, 0, 1)
-        halo = strength.copy()
-        kernel = np.ones((7, 7), dtype=np.float32) / 49
-        for _ in range(45):
-            halo = convolve(halo, kernel)
-        strength = np.maximum(strength, 1.2 * halo)
+
+        glow = edges.copy()
+        kernel = np.ones((self.blur_size, self.blur_size), dtype=np.float32)
+        kernel /= self.blur_size ** 2
+        for _ in range(self.blur_iterations):
+            glow = convolve(glow, kernel)
+        strength = np.maximum(edges, self.glow_strength * glow)
         color = np.array([0, 255, 255], dtype=np.float32)
         neon = strength[:, :, None] * color
-        neon_aplha = 0.5
-        result = base + neon_aplha * neon
+        result = base + self.neon_alpha * neon
         return to_uint8(result)
