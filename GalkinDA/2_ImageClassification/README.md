@@ -99,15 +99,23 @@ python main.py test --data data/Dataset_640 --model models/mobilenetv2_svm_512.j
 ### Предсказание для одной фотографии
 
 ```sh
-python main.py predict --image examples/sample.jpg --model models/mobilenetv2_svm_512.joblib --save-plot results/prediction.png
+python main.py predict --image data/Dataset_640/test/ExtDataset/00_Other/006666_800x531.jpg.jpg --model models/sift.joblib --save-plot results/prediction_sift.png
+python main.py predict --image data/Dataset_640/test/ExtDataset/00_Other/006666_800x531.jpg.jpg --model models/orb.joblib --save-plot results/prediction_orb.png
+python main.py predict --image data/Dataset_640/test/ExtDataset/00_Other/006666_800x531.jpg.jpg --model models/resnet18_layer4.joblib --save-plot results/prediction_resnet18.png
+python main.py predict --image data/Dataset_640/test/ExtDataset/00_Other/006666_800x531.jpg.jpg --model models/mobilenetv2_svm_512.joblib --save-plot results/prediction_mobilenetv2.png
 ```
 
-Команда печатает метку класса и сохраняет снимок с гистограммой в `results/prediction.png`. Для своей фотографии замените путь после `--image`. Если убрать `--save-plot results/prediction.png`, рисунок откроется в окне.
+Все команды берут один снимок класса `00_Other` из тестовой выборки. Каждая печатает предсказанную метку и сохраняет снимок с гистограммой в отдельный PNG. Для своей фотографии замените путь после `--image`. Если убрать параметр `--save-plot` вместе с путём, рисунок откроется в окне.
 
-Чтобы посмотреть по одному тестовому примеру каждого класса с правильной и предсказанной метками, соберите их на одном рисунке:
+### Демонстрация по всем классам
+
+Каждая команда сохраняет рисунок с одним тестовым снимком на класс и двумя метками для каждого снимка — правильной и предсказанной. Все модели используют один и тот же набор снимков благодаря одинаковому `--seed`.
 
 ```sh
-python demo.py --data data/Dataset_640 --model models/mobilenetv2_svm_512.joblib --output results/demo.png
+python demo.py --data data/Dataset_640 --model models/sift.joblib --seed 42 --output results/demo_sift.png
+python demo.py --data data/Dataset_640 --model models/orb.joblib --seed 42 --output results/demo_orb.png
+python demo.py --data data/Dataset_640 --model models/resnet18_layer4.joblib --seed 42 --output results/demo_resnet18.png
+python demo.py --data data/Dataset_640 --model models/mobilenetv2_svm_512.joblib --seed 42 --output results/demo_mobilenetv2.png
 ```
 
 ## Результат
