@@ -52,40 +52,12 @@
 
 ## Запуск
 
-Из корня репозитория перейдите в папку работы:
-
-```sh
-cd GalkinDA/2_ImageClassification
-```
-
 ### Установка
-
-**Linux и macOS**
-
-```sh
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-```
-
-**Windows (PowerShell)**
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-```
-
-**Windows без интернета.** На домашнем Windows с той же архитектурой и Python 3.12 скачайте установочные пакеты:
-
-```powershell
-py -3.12 -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
-```
-
-Возьмите на флешку проект, `data/Dataset_640`, `weights` и `wheelhouse`. На учебном компьютере скопируйте их в рабочую папку, создайте и активируйте окружение командами выше. Для установки зависимостей из локальной папки выполните:
-
-```powershell
-python -m pip install --no-index --find-links=wheelhouse -r requirements.txt
 ```
 
 ### Данные и веса
