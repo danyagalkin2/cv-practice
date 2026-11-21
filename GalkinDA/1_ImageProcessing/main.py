@@ -2,7 +2,7 @@ import argparse
 import sys
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from filters import ImageFilter
 
@@ -13,7 +13,7 @@ def cli_argument_parser():
     parser.add_argument('output', help='путь для результата')
     parser.add_argument('--filter', required=True,
                         choices=['resize', 'gray', 'antique', 'fade', 'film',
-                                 'matte', 'scratches', 'neon'])
+                                 'matte', 'scratches_texture', 'neon'])
     parser.add_argument('--new-h', type=int)
     parser.add_argument('--new-w', type=int)
     parser.add_argument('--alpha', type=float, default=0.5)
@@ -21,16 +21,28 @@ def cli_argument_parser():
                         metavar=('R', 'G', 'B'), default=(200, 200, 200))
     parser.add_argument('--grain-sigma', type=float, default=10)
     parser.add_argument('--noise-sigma', type=float, default=15)
-    parser.add_argument('--num-scratches', type=int, default=7)
-    parser.add_argument('--sob-threshold', type=float, default=50)
+    parser.add_argument('--texture-alpha', type=float, default=0.65,
+                        help='сила текстуры от 0 до 1 (по умолчанию 0.65)')
+    parser.add_argument('--sob-threshold', type=float, default=50,
+                        help='порог контуров неона, не меньше 0 (по умолчанию 50)')
+    parser.add_argument('--blur-size', type=int, default=7,
+                        help='неон: нечётный размер ядра размытия больше 0 (по умолчанию 7)')
+    parser.add_argument('--blur-iterations', type=int, default=45,
+                        help='неон: число проходов размытия, не меньше 0 (по умолчанию 45)')
+    parser.add_argument('--glow-strength', type=float, default=1.2,
+                        help='неон: усиление ореола, не меньше 0 (по умолчанию 1.2)')
+    parser.add_argument('--neon-alpha', type=float, default=0.5,
+                        help='сила всего неонового эффекта от 0 до 1 (по умолчанию 0.5)')
     parser.add_argument('--seed', type=int)
+    parser.add_argument('--radius', type=float, default=1.25)
+    parser.add_argument('--feather', type=float, default=0.4)
     return parser.parse_args()
 
 
 def read_image(path):
     try:
         with Image.open(path) as image:
-            img = np.array(image)
+            img = np.array(ImageOps.exif_transpose(image))
     except FileNotFoundError:
         raise ValueError('Файл не найден: ' + path)
     except OSError:

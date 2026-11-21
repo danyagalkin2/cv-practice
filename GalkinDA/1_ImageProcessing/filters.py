@@ -1,4 +1,5 @@
 import numpy as np
+from PIL import Image
 
 def to_uint8(img):
     return np.clip(img, 0, 255).astype(np.uint8)
@@ -40,13 +41,22 @@ class ImageFilter:
         if name == 'film':
             return Film(params.get('grain_sigma', 10), params.get('seed'))
         if name == 'matte':
-            return Matte()
+            return Matte(
+                params.get('radius', 1.25),
+                params.get('feather', 0.4)
+            )
         if name == 'neon':
-            return Neon(params.get('sob_threshold', 50))
-        if name == 'scratches':
-            return ScratchesNoise(params.get('noise_sigma', 15),
-                                  params.get('num_scratches', 7),
-                                  params.get('seed'))
+            return Neon(
+                sob_threshold=params.get('sob_threshold', 50),
+                blur_size=params.get('blur_size', 7),
+                blur_iterations=params.get('blur_iterations', 45),
+                glow_strength=params.get('glow_strength', 1.2),
+                neon_alpha=params.get('neon_alpha', 0.5),
+            )
+        if name == 'scratches_texture':
+            return ScratchesTexture(params.get('noise_sigma', 15),
+                                    params.get('texture_alpha', 0.65),
+                                    params.get('seed'))
         raise ValueError('Неизвестный фильтр: ' + name)
 
     def apply_filter(self, img):
@@ -84,6 +94,14 @@ class Antique(ImageFilter):
                            [0.349, 0.686, 0.168],
                            [0.272, 0.534, 0.131]], dtype=np.float32)
         result = img.astype(np.float32) @ matrix.T
+        h, w = img.shape[:2]
+        cx, cy = (w - 1) / 2, (h - 1) / 2
+        x = (np.arange(w, dtype=np.float32) - cx) / max(cx, 0.5)
+        y = (np.arange(h, dtype=np.float32) - cy) / max(cy, 0.5)
+        distance_squared = (y[:, None] ** 2 + x[None, :] ** 2) / 2
+        vignette_strength = 0.75
+        vignette = 1 - vignette_strength * distance_squared
+        result *= vignette[..., None]
         return to_uint8(result)
 
 
@@ -117,9 +135,9 @@ class Film(ImageFilter):
             raise ValueError('Для плёнки нужно RGB-изображение')
         source = img.astype(np.float32)
         aerochrome_matrix = np.array([
-            [ 0.0,  2.0, -1.0 ], 
-            [ 1.0,  0.0,  0.0 ], 
-            [ 0.0, -1.0,  2.0 ]   
+            [ -0.5,  4.5, -2.3 ], 
+            [ 1.0,  -2.0,  2.0 ], 
+            [ 0.0, -0.6,  1.6 ]   
         ])
         result = np.dot(source, aerochrome_matrix.T)
         
@@ -133,6 +151,13 @@ class Film(ImageFilter):
 
 
 class Matte(ImageFilter):
+    def __init__(self, radius=1.25, feather=0.4):
+        if radius <= 0 or feather <= 0:
+            raise ValueError('Радиус и плавность должны быть больше нуля')
+
+        self.radius = radius
+        self.feather = feather
+
     def apply_filter(self, img):
         h, w = img.shape[:2]
         y, x = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
@@ -142,61 +167,71 @@ class Matte(ImageFilter):
         radius_y = max(center_y, 0.5)
         distance = np.sqrt(((x - center_x) / radius_x) ** 2 +
                            ((y - center_y) / radius_y) ** 2)
-        weight = np.clip((1 - distance) / 0.5, 0, 1)
+        weight = np.clip((self.radius - distance) / self.feather, 0, 1)
         if img.ndim == 3:
             weight = weight[:, :, None]
         result = weight * img.astype(np.float32) + (1 - weight) * 255
         return to_uint8(result)
 
-class ScratchesNoise(ImageFilter):
-    def __init__(self, noise_sigma=15, num_scratches=7, seed=None):
-        if not isinstance(noise_sigma, (int, float, np.integer, np.floating)) or \
-                not np.isfinite(noise_sigma) or noise_sigma < 0:
+class ScratchesTexture(ImageFilter):
+    def __init__(self, noise_sigma=15, texture_alpha=0.65, seed=None):
+        if not np.isfinite(noise_sigma) or noise_sigma < 0:
             raise ValueError('noise_sigma должен быть конечным числом не меньше нуля')
-        if not isinstance(num_scratches, (int, np.integer)) or num_scratches < 0:
-            raise ValueError('num_scratches должен быть целым числом не меньше нуля')
+        if not 0 <= texture_alpha <= 1:
+            raise ValueError('texture_alpha должен быть от 0 до 1')
         self.noise_sigma = noise_sigma
-        self.num_scratches = num_scratches
+        self.texture_alpha = texture_alpha
         self.seed = seed
 
     def apply_filter(self, img):
-        rng = np.random.default_rng(self.seed)
-
-        result = img.astype(np.float32)
-        result += rng.normal(0, self.noise_sigma, img.shape)
-
+        if img.ndim != 3 or img.shape[2] != 3:
+            raise ValueError('Для состаривания нужно RGB-изображение')
         h, w = img.shape[:2]
-        for _ in range(self.num_scratches):
-            x0, x1 = rng.integers(0, w, size=2)
-            y0, y1 = rng.integers(0, h, size=2)
-            thickness = rng.integers(1, 3)
-            dx, dy = x1 - x0, y1 - y0
-            n = max(abs(dx), abs(dy)) + 1
-            t = np.linspace(0, 1, n)
-            x = np.rint(x0 + t * dx).astype(int)[:, None]
-            y = np.rint(y0 + t * dy).astype(int)[:, None]
 
-            offsets = np.arange(thickness)[None, :]
-            if abs(dx) >= abs(dy):
-                x = x + np.zeros_like(offsets)
-                y = y + offsets
-            else:
-                x = x + offsets
-                y = y + np.zeros_like(offsets)
+        matrix = np.array([[0.393, 0.769, 0.189],
+                           [0.349, 0.686, 0.168],
+                           [0.272, 0.534, 0.131]], dtype=np.float32)
+        result = np.clip(img.astype(np.float32) @ matrix.T, 0, 255)
 
-            valid = (x >= 0) & (x < w) & (y >= 0) & (y < h)
-            result[y[valid], x[valid]] = 255
+        rng = np.random.default_rng(self.seed)
+        result = np.clip(result + rng.normal(0, self.noise_sigma, (h, w, 1)), 0, 255)
 
-        return to_uint8(result)
+        with Image.open('images/tekstyra_small.jpg') as source:
+            texture = np.array(source)
+
+        texture = Resize(h, w).apply_filter(texture)
+
+        texture = get_gray(texture)
+        mask = texture[..., None] / 255
+
+        screen = 255 - (255 - result) * (1 - mask)
+        return to_uint8((1 - self.texture_alpha) * result + self.texture_alpha * screen)
+
 
 class Neon(ImageFilter):
-    def __init__(self, sob_threshold=50):
-        if sob_threshold < 0:
-            raise ValueError('Порог Собеля не может быть отрицательным')
+    def __init__(self, sob_threshold=50, blur_size=7, blur_iterations=45,
+                 glow_strength=1.2, neon_alpha=0.5):
+        if not np.isfinite(sob_threshold) or sob_threshold < 0:
+            raise ValueError('Порог Собеля должен быть конечным числом не меньше нуля')
+        if not isinstance(blur_size, (int, np.integer)) or blur_size <= 0 or blur_size % 2 == 0:
+            raise ValueError('blur_size должен быть положительным нечётным целым числом')
+        if not isinstance(blur_iterations, (int, np.integer)) or blur_iterations < 0:
+            raise ValueError('blur_iterations должен быть целым числом не меньше нуля')
+        if not np.isfinite(glow_strength) or glow_strength < 0:
+            raise ValueError('glow_strength должен быть конечным числом не меньше нуля')
+        if not 0 <= neon_alpha <= 1:
+            raise ValueError('neon_alpha должен быть от 0 до 1')
         self.sob_threshold = sob_threshold
+        self.blur_size = blur_size
+        self.blur_iterations = blur_iterations
+        self.glow_strength = glow_strength
+        self.neon_alpha = neon_alpha
 
     def apply_filter(self, img):
+        if img.ndim != 3 or img.shape[2] != 3:
+            raise ValueError('Для неона нужно RGB-изображение')
         gray = get_gray(img)
+        base = img.astype(np.float32)
         kernel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
                             dtype=np.float32)
         kernel_y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]],
@@ -205,7 +240,14 @@ class Neon(ImageFilter):
         gradient_y = convolve(gray, kernel_y)
         magnitude = np.sqrt(gradient_x ** 2 + gradient_y ** 2)
         edges = (magnitude > self.sob_threshold).astype(np.float32)
-        glow = convolve(edges, np.ones((5, 5), dtype=np.float32) / 25)
-        strength = np.clip(edges + 2 * glow, 0, 1)
+
+        glow = edges.copy()
+        kernel = np.ones((self.blur_size, self.blur_size), dtype=np.float32)
+        kernel /= self.blur_size ** 2
+        for _ in range(self.blur_iterations):
+            glow = convolve(glow, kernel)
+        strength = np.maximum(edges, self.glow_strength * glow)
         color = np.array([0, 255, 255], dtype=np.float32)
-        return to_uint8(strength[:, :, None] * color)
+        neon = strength[:, :, None] * color
+        result = base + self.neon_alpha * neon
+        return to_uint8(result)
